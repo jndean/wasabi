@@ -4,6 +4,8 @@
 
 #include<Python.h>
 
+
+
 // ------------------------------ Integers ------------------------------ //
 static PyLongObject* small_ints = NULL;
 static const int nsmallposints = 257;
@@ -63,7 +65,8 @@ PyObject* wasabi_ResetSmallInt(PyObject* self, PyObject* args){
   
   // Set the value */
   *target->ob_digit = abs((target - small_ints) - nsmallnegints);
-  Py_SIZE(target) *= 1 - (((target < small_ints + nsmallnegints) ^ (Py_SIZE(target) < 0)) << 1);
+  Py_SIZE(target) *= 1 - (((target < small_ints + nsmallnegints) ^
+			   (Py_SIZE(target) < 0)) << 1);
   
   Py_RETURN_TRUE;
 }
@@ -110,8 +113,36 @@ PyObject* wasabi_SetSingleBytes(PyObject* self, PyObject* args){
   Py_RETURN_TRUE;
 }
 
+// ---------------------------------- Tuples ---------------------------------- //
+
+PyObject* wasabi_SetTupleItem(PyObject* self, PyObject* args){
+
+  PyObject *op = NULL, *newitem = NULL;
+  Py_ssize_t i = -1;
+  
+  if(!PyArg_ParseTuple(args, "OnO", &op, &i, &newitem))
+    return NULL;
+
+  if (!PyTuple_Check(op)) {
+    PyErr_BadInternalCall();
+    return NULL;
+  }
+  if (i < 0 || i >= Py_SIZE(op)) {
+    PyErr_SetString(PyExc_IndexError, "tuple assignment index out of range");
+    return NULL;
+  }
+  
+  Py_INCREF(newitem);
+  PyObject **p = ((PyTupleObject *)op) -> ob_item + i;
+  Py_XSETREF(*p, newitem);
+
+  Py_RETURN_TRUE;
+}
+
+
 
 // ------------------------------ Monkey patching ------------------------------//
+
 
 // Recreate this here because it's not visible through Python.h //
 typedef struct {
@@ -123,7 +154,7 @@ typedef struct {
 PyObject* wasabi_MonkeyPatch(PyObject* self, PyObject* args){
 
   PyObject *target = NULL, *name = NULL, *payload = NULL;
-  PyObject *dict_proxy = NULL, *dict = NULL;
+  PyObject *dict_proxy = NULL, *dict = NULL, *existing = NULL;
   
   if(!PyArg_ParseTuple(args, "OOO", &target, &name, &payload))
     goto error_cleanup;
@@ -135,14 +166,23 @@ PyObject* wasabi_MonkeyPatch(PyObject* self, PyObject* args){
   if (PyDict_Check(dict_proxy)) dict = dict_proxy;
   else dict = ((mappingproxyobject*)dict_proxy)->mapping;
 
-  // MIDLERTIDIG: NEED TO CHECK IF THE ATTRIBUTE IS A SLOT (WRAPPER)
-  /*if(Py_TYPE(dict) == &PyWrapperDescr_Type){
-    printf("That's a wrapper descr type, not touching that yet...\n");
-    Py_DECREF(dict_proxy);
-    Py_RETURN_NONE;
-    }*/
-  if(-1 == PyDict_SetItem(dict, name, payload))
-   goto error_cleanup;
+  if(NULL != (existing = PyDict_GetItem(dict, name))){
+    if(PyErr_Occurred()) goto error_cleanup;    
+    if(Py_TYPE(existing) == &PyWrapperDescr_Type){
+      wrapperfunc wrapper = ((PyWrapperDescrObject *)existing)->d_base->wrapper;
+      // MIDLERTIDIG: NEED TO CHECK IF THE ATTRIBUTE IS A SLOT (WRAPPER)
+      printf("That's a wrapper descr type, not touching that yet...\n");
+      Py_DECREF(dict_proxy);
+      Py_RETURN_NONE;
+      
+	
+    }
+  }
+
+  if(-1 == PyDict_SetItem(dict, name, payload)){
+    printf("Failed to set item\n");
+    goto error_cleanup;
+  }
   
   Py_DECREF(dict_proxy);
   Py_RETURN_NONE;
@@ -152,15 +192,62 @@ PyObject* wasabi_MonkeyPatch(PyObject* self, PyObject* args){
   return NULL;
 }
 
-/*PyObject* wasabi_Unwrap(PyObject* self, PyObject* args){
-  PyObject* wrapper = NULL;
-  if(!PyArg_ParseTuple(args, "O", &wrapper))
-    return NULL;
-  printf("%d\n", Py_TYPE(wrapper) == &_PyMethodWrapper_Type);
-  //printf("%s\n", wrapper.tp)
-  //PyObject* value = wrapper
+
+
+
+
+
+PyObject* (*old_long_xor)(PyObject*, PyObject*) = NULL;
+PyObject* my_long_xor = NULL;
+PyObject* my_long_xor_wrapper(PyObject* a, PyObject* b){
+  return PyObject_CallFunctionObjArgs(my_long_xor, a, b, NULL);
+}
+
+PyObject* wasabi_test(PyObject* self, PyObject* args){
+
+  PyObject *input = NULL, *integer;
+  
+  if(-1 == PyArg_ParseTuple(args, "OO", &input, &integer))
+    goto error_cleanup;
+
+  if(!PyCallable_Check(input)){
+    PyErr_SetString(PyExc_ValueError, "Require a callable object");
+    goto error_cleanup;
+  }
+  
+  PyNumberMethods* int_number_methods = PyLong_Type.tp_as_number;
+  if(NULL == old_long_xor) old_long_xor = int_number_methods->nb_xor;
+  
+  Py_INCREF(input);
+  Py_XDECREF(my_long_xor);
+  my_long_xor = input;
+  int_number_methods->nb_xor = my_long_xor_wrapper;
+
+
+  // Replacing slot //
+  PyObject* dict_proxy = PyObject_GetAttrString(integer, "__dict__");
+  PyObject* dict = ((mappingproxyobject*)dict_proxy)->mapping;
+  
+  PyObject* xor = PyDict_GetItemString(dict, "__xor__");
+  if(PyErr_Occurred()) return NULL;
+  if(NULL == xor) {
+    PyErr_SetString(PyExc_ValueError, "No method __xor__");
+    goto error_cleanup;
+  }
+
+  ((PyWrapperDescrObject*)xor)->d_wrapped = my_long_xor;
+  
+  Py_DECREF(dict_proxy);
+  Py_DECREF(xor);
+  
   Py_RETURN_NONE;
-  }*/
+  
+ error_cleanup:
+  return NULL;
+}
+
+
+
 
 // ------------------------------ Module Setup ------------------------------ //
 
@@ -174,6 +261,10 @@ static PyMethodDef WasabiMethods[] = {
     {"set_single_bytes",  wasabi_SetSingleBytes, METH_VARARGS,
      "."},
     {"set_attr",  wasabi_MonkeyPatch, METH_VARARGS,
+     "."},
+    {"test",  wasabi_test, METH_VARARGS,
+     "."},
+    {"set_tuple_item", wasabi_SetTupleItem, METH_VARARGS,
      "."},
     //{"unwrap",  wasabi_Unwrap, METH_VARARGS,
     // "."},
