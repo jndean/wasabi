@@ -26,7 +26,10 @@ PyObject* wasabi_SetInt(PyObject* self, PyObject* args){
   /* Fail on insufficient space */
   Py_ssize_t target_size = abs(Py_SIZE(target));
   Py_ssize_t source_size = abs(Py_SIZE(source));
-  if(target_size <source_size) Py_RETURN_FALSE;
+  if(target_size <source_size) {
+    PyErr_SetString(PyExc_ValueError, "Target value too small to store payload.");
+    return NULL;
+  }
 
   /* Copy across the absolute value */
   memcpy(target->ob_digit, source->ob_digit, source_size * sizeof(digit));
@@ -37,7 +40,7 @@ PyObject* wasabi_SetInt(PyObject* self, PyObject* args){
   int source_sgn =  Py_SIZE(source) == 0 ? 0 : (Py_SIZE(source) < 0 ? -1 : 1);
   Py_SIZE(target) *= target_sgn * source_sgn;      
   
-  Py_RETURN_TRUE;
+  Py_RETURN_NONE;
 }
 
 
@@ -60,15 +63,17 @@ PyObject* wasabi_ResetSmallInt(PyObject* self, PyObject* args){
   }
 
   /* Fail if given an int not in the small_int table */
-  if(target < small_ints || target >= small_ints + nsmallposints + nsmallnegints)
-    Py_RETURN_FALSE;
+  if(target < small_ints || target >= small_ints + nsmallposints + nsmallnegints){
+     PyErr_SetString(PyExc_ValueError, "Specified int is not a singleton.");
+    return NULL;
+  }
   
   // Set the value */
   *target->ob_digit = abs((target - small_ints) - nsmallnegints);
   Py_SIZE(target) *= 1 - (((target < small_ints + nsmallnegints) ^
 			   (Py_SIZE(target) < 0)) << 1);
   
-  Py_RETURN_TRUE;
+  Py_RETURN_NONE;
 }
 
 
@@ -89,7 +94,7 @@ PyObject* wasabi_SetBytes(PyObject* self, PyObject* args){
   
   PyBuffer_Release(&target_view);
   PyBuffer_Release(&source_view);
-  Py_RETURN_TRUE;
+  Py_RETURN_NONE;
 }
 
 PyObject* wasabi_SetSingleBytes(PyObject* self, PyObject* args){
@@ -110,7 +115,7 @@ PyObject* wasabi_SetSingleBytes(PyObject* self, PyObject* args){
   *target = value;
   
   PyBuffer_Release(&target_view);
-  Py_RETURN_TRUE;
+  Py_RETURN_NONE;
 }
 
 // ---------------------------------- Tuples ---------------------------------- //
@@ -120,7 +125,7 @@ PyObject* wasabi_SetTupleItem(PyObject* self, PyObject* args){
   PyObject *op = NULL, *newitem = NULL;
   Py_ssize_t i = -1;
   
-  if(!PyArg_ParseTuple(args, "OnO", &op, &i, &newitem))
+  if(!PyArg_ParseTuple(args, "OnO:set_tuple_item", &op, &i, &newitem))
     return NULL;
 
   if (!PyTuple_Check(op)) {
@@ -136,9 +141,71 @@ PyObject* wasabi_SetTupleItem(PyObject* self, PyObject* args){
   PyObject **p = ((PyTupleObject *)op) -> ob_item + i;
   Py_XSETREF(*p, newitem);
 
-  Py_RETURN_TRUE;
+  Py_RETURN_NONE;
 }
 
+
+
+// ---------------------------------- Floats ----------------------------------- //
+
+PyObject* wasabi_SetFloat(PyObject* self, PyObject* args){
+
+  PyObject *target = NULL, *payload = NULL;
+  
+  if(!PyArg_ParseTuple(args, "OO:set_float", &target, &payload))
+    return NULL;
+
+  if (!PyFloat_Check(target) || !PyFloat_Check(payload)){
+    PyErr_SetString(PyExc_ValueError, "Both arguents should be floats");
+    return NULL;
+  }
+
+  ((PyFloatObject*) target)->ob_fval = ((PyFloatObject*) payload)->ob_fval;
+
+  Py_RETURN_NONE;
+}
+
+
+PyObject* wasabi_GetFreeFloats(PyObject* self, PyObject* args){
+
+  unsigned int max_ints = -1;
+  
+  if(!PyArg_ParseTuple(args, "|I:get_free_floats", &max_ints))
+    return NULL;
+
+  // To get a pointer to the free_list, create a float and free it //
+  PyObject* free_list = PyFloat_FromDouble(0);
+  Py_DECREF(free_list);
+  
+  // The free_list is a linked list, where the next free float is pointed at
+  // using the ob_type field of the current float struct
+  long num_returned = 0;
+  PyObject* tmp = free_list;
+  while(NULL != Py_TYPE(tmp)) {
+    tmp = (PyObject*) Py_TYPE(tmp);
+    num_returned++;
+  }
+  double* vals = malloc(num_returned * sizeof(double));
+  
+
+  free(vals);
+  return PyLong_FromLong(num_returned);  
+ 
+}
+
+// ----------------------------- Strings (Unicode) ----------------------------- //
+
+/*PyObject* wasabi_SetString(PyObject* self, PyObject* args){
+
+  PyObject *target = NULL, *payload = NULL;
+  
+  if(!PyArg_ParseTuple(args, "OO", &target, &payload))
+    return NULL;
+  
+  printf("%d\n", PyUnicode_Check(target));
+  (((PyASCIIObject*)(op))->wstr)(((PyASCIIObject*)(op))->wstr)(((PyASCIIObject*)(op))->wstr)
+  Py_RETURN_TRUE;
+  }*/
 
 
 // ------------------------------ Monkey patching ------------------------------//
@@ -265,6 +332,10 @@ static PyMethodDef WasabiMethods[] = {
     {"test",  wasabi_test, METH_VARARGS,
      "."},
     {"set_tuple_item", wasabi_SetTupleItem, METH_VARARGS,
+     "."},
+    {"set_float", wasabi_SetFloat, METH_VARARGS,
+     "."},
+    {"get_free_floats", wasabi_GetFreeFloats, METH_VARARGS,
      "."},
     //{"unwrap",  wasabi_Unwrap, METH_VARARGS,
     // "."},

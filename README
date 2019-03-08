@@ -1,3 +1,6 @@
-A module for people who like pina coladas,  think that immutability is the tool of an oppresive regime, and think of segfaults as character-building opportunities.
+A module for people who
+ + like pina coladas
+ + can deal with a healthy number of segfaults
+ + recognise immutability as the tool of an oppressive regime
 
 Not recommended for production code. Or at all.
