@@ -167,30 +167,57 @@ PyObject* wasabi_SetFloat(PyObject* self, PyObject* args){
 
 
 PyObject* wasabi_GetFreeFloats(PyObject* self, PyObject* args){
-
-  unsigned int max_ints = -1;
+  long num_returned = 0;
+  double* vals = NULL;
+  PyObject* output = NULL;
   
+  unsigned int max_ints = -1;
   if(!PyArg_ParseTuple(args, "|I:get_free_floats", &max_ints))
-    return NULL;
+    goto failure;
 
   // To get a pointer to the free_list, create a float and free it //
+  // This will consume one of the free floats //
   PyObject* free_list = PyFloat_FromDouble(0);
   Py_DECREF(free_list);
-  
+    
   // The free_list is a linked list, where the next free float is pointed at
   // using the ob_type field of the current float struct
-  long num_returned = 0;
-  PyObject* tmp = free_list;
-  while(NULL != Py_TYPE(tmp)) {
-    tmp = (PyObject*) Py_TYPE(tmp);
+  // The first item will be the 0.0 we freed above, which isn't interesting, so
+  // we skip it.
+  PyObject* next_float = free_list;
+  while(NULL != Py_TYPE(next_float)) {
+    next_float = (PyObject*) Py_TYPE(next_float);
     num_returned++;
   }
-  double* vals = malloc(num_returned * sizeof(double));
-  
 
-  free(vals);
-  return PyLong_FromLong(num_returned);  
- 
+  // Read off values without damaging them by allocating new PyFloats //
+  vals = malloc(num_returned * sizeof(double));
+  next_float = free_list;
+  for (int i = 0; i < num_returned; i++) {
+    next_float = (PyObject*) Py_TYPE(next_float);
+    vals[i] = ((PyFloatObject*) next_float)->ob_fval;
+  }
+
+  // Create the output //
+  output = PyList_New(num_returned);
+  if (!output) goto failure;
+  for (int i = 0; i < num_returned; i++) {
+    PyObject* f = PyFloat_FromDouble(vals[i]);
+    if (!f) goto failure;
+    PyList_SET_ITEM(output, i, f);
+  }
+
+  if (vals) free(vals);
+  return output;
+  
+ failure:
+  if (vals) free(vals);
+  if (output) {
+    for (int i = 0; i < num_returned; i++)
+      Py_XDECREF(PyList_GET_ITEM(output, i));
+    Py_DECREF(output);
+  }
+  return NULL;
 }
 
 // ----------------------------- Strings (Unicode) ----------------------------- //
@@ -236,7 +263,7 @@ PyObject* wasabi_MonkeyPatch(PyObject* self, PyObject* args){
   if(NULL != (existing = PyDict_GetItem(dict, name))){
     if(PyErr_Occurred()) goto error_cleanup;    
     if(Py_TYPE(existing) == &PyWrapperDescr_Type){
-      wrapperfunc wrapper = ((PyWrapperDescrObject *)existing)->d_base->wrapper;
+      //wrapperfunc wrapper = ((PyWrapperDescrObject *)existing)->d_base->wrapper;
       // MIDLERTIDIG: NEED TO CHECK IF THE ATTRIBUTE IS A SLOT (WRAPPER)
       printf("That's a wrapper descr type, not touching that yet...\n");
       Py_DECREF(dict_proxy);
