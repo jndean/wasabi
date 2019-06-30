@@ -268,8 +268,6 @@ PyObject* wasabi_MonkeyPatch(PyObject* self, PyObject* args){
       printf("That's a wrapper descr type, not touching that yet...\n");
       Py_DECREF(dict_proxy);
       Py_RETURN_NONE;
-      
-	
     }
   }
 
@@ -362,7 +360,7 @@ static PyMethodDef WasabiMethods[] = {
      "."},
     {"set_float", wasabi_SetFloat, METH_VARARGS,
      "."},
-    {"get_free_floats", wasabi_GetFreeFloats, METH_VARARGS,
+    {"get_recent_floats", wasabi_GetFreeFloats, METH_VARARGS,
      "."},
     //{"unwrap",  wasabi_Unwrap, METH_VARARGS,
     // "."},
