@@ -1,10 +1,11 @@
 #!/usr/bin/python3
 
-import wasabi
 import random
+from math import sin, cos
+import wasabi
 
 
-print('\n-------------------- Singleton Integers (-5 to 256) --------------------')
+print('\n---------------- Singleton Integers (-5 to 256) -----------------')
 x = 50
 
 wasabi.set_int(50, 53)
@@ -39,7 +40,7 @@ wasabi.reset_small_int(90)
 print(50)  # 50
 
 
-print('\n------------ Bytes, Tuples, Floats, Non-singleton Integers ------------')
+print('\n--------- Bytes, Tuples, Floats, Non-singleton Integers ---------')
 
 def func(B, T, F, I):
     wasabi.set_bytes(B, b'x' * len(B))
@@ -62,11 +63,11 @@ print(T)  # ('wasabi', 'wasabi', 'wasabi', 'wasabi')
 print(F)  # 1.701
 print(I)  # 1701
 
-# Also, remember that byte strings of length 1 are singletons,
+# Also, remember that bytes of length 1 are singletons,
 # and so behave like the small Singleton Integers in the example above
     
 
-print('\n--------------------- Monkey Patching --------------------')
+print('\n------------------------ Monkey Patching ------------------------')
 
 
 wasabi.set_attr(int, "new_property", 100)
@@ -78,12 +79,11 @@ wasabi.set_attr(bytes, "backwards", lambda x: x[::-1])
 x = b'wasabi'
 print(x.backwards())  # b'ibasaw'
 
-wasabi.set_attr(type(...), "...", "Gross")
-x = type(...)
-print(getattr(x, "..."))  # "Gross"
+# Non-string keys are possible, but diffficult to look up later
+wasabi.set_attr(type(Ellipsis), int, "Gross")
 
 
-print('\n------------------ Recently used floats ------------------')
+print('\n--------------------- Recently used floats ----------------------')
 
 def important_function(secret_input):
     secret_floats = [random.random() for i in range(10)]
